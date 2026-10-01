@@ -1,20 +1,21 @@
 const express = require("express");
 const path = require("path");
 const { version } = require("./package.json");
+const db = require("./db");
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// เก็บใน memory: ข้อมูลหายเมื่อ server restart
-let todos = [
-  { id: 1, text: "Deploy ขึ้น Render", done: true },
-  { id: 2, text: "ลองเพิ่ม todo ใหม่", done: false },
-];
-let nextId = 3;
+const MAX_TODOS = 100;
 
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+app.get("/health", async (req, res) => {
+  try {
+    await db.pool.query("SELECT 1");
+    res.json({ status: "ok" });
+  } catch {
+    res.status(503).json({ status: "db unavailable" });
+  }
 });
 
 app.get("/api/info", (req, res) => {
@@ -25,39 +26,59 @@ app.get("/api/info", (req, res) => {
   });
 });
 
-app.get("/api/todos", (req, res) => {
-  res.json(todos);
+app.get("/api/todos", async (req, res) => {
+  const { rows } = await db.pool.query("SELECT id, text, done FROM todos ORDER BY id");
+  res.json(rows);
 });
 
-app.post("/api/todos", (req, res) => {
+app.post("/api/todos", async (req, res) => {
   const text = String(req.body?.text ?? "").trim();
   if (!text) return res.status(400).json({ error: "text is required" });
   if (text.length > 200) return res.status(400).json({ error: "text is too long" });
-  if (todos.length >= 100) return res.status(400).json({ error: "too many todos" });
 
-  const todo = { id: nextId++, text, done: false };
-  todos.push(todo);
-  res.status(201).json(todo);
+  const { rows: countRows } = await db.pool.query("SELECT COUNT(*)::int AS n FROM todos");
+  if (countRows[0].n >= MAX_TODOS) return res.status(400).json({ error: "too many todos" });
+
+  const { rows } = await db.pool.query(
+    "INSERT INTO todos (text) VALUES ($1) RETURNING id, text, done",
+    [text]
+  );
+  res.status(201).json(rows[0]);
 });
 
-app.patch("/api/todos/:id", (req, res) => {
-  const todo = todos.find((t) => t.id === Number(req.params.id));
-  if (!todo) return res.status(404).json({ error: "not found" });
+app.patch("/api/todos/:id", async (req, res) => {
+  const { rows } = await db.pool.query(
+    "UPDATE todos SET done = $1 WHERE id = $2 RETURNING id, text, done",
+    [Boolean(req.body?.done), Number(req.params.id) || 0]
+  );
+  if (rows.length === 0) return res.status(404).json({ error: "not found" });
 
-  todo.done = Boolean(req.body?.done);
-  res.json(todo);
+  res.json(rows[0]);
 });
 
-app.delete("/api/todos/:id", (req, res) => {
-  const before = todos.length;
-  todos = todos.filter((t) => t.id !== Number(req.params.id));
-  if (todos.length === before) return res.status(404).json({ error: "not found" });
+app.delete("/api/todos/:id", async (req, res) => {
+  const { rowCount } = await db.pool.query("DELETE FROM todos WHERE id = $1", [
+    Number(req.params.id) || 0,
+  ]);
+  if (rowCount === 0) return res.status(404).json({ error: "not found" });
 
   res.status(204).end();
 });
 
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: "internal server error" });
+});
+
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log(`Listening on http://localhost:${PORT}`);
-});
+db.init()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Listening on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to connect to database:", err.message);
+    process.exit(1);
+  });

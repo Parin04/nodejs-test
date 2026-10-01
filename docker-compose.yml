@@ -5,4 +5,28 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
+      - DATABASE_URL=postgres://todo:todo@db:5432/todo
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=todo
+      - POSTGRES_PASSWORD=todo
+      - POSTGRES_DB=todo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U todo -d todo"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
