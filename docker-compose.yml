@@ -17,8 +17,9 @@ services:
       - POSTGRES_USER=todo
       - POSTGRES_PASSWORD=todo
       - POSTGRES_DB=todo
+    # เปิดไว้ให้ต่อจาก DB client ในเครื่อง (5432 ชนกับ PostgreSQL ที่ติดตั้งบน Windows)
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
