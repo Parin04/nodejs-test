@@ -66,6 +66,10 @@ app.delete("/api/todos/:id", async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
+  // error จากฝั่ง client เช่น JSON ผิดรูปแบบ (body-parser ใส่ status 4xx มาให้)
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.message });
+  }
   console.error(err);
   res.status(500).json({ error: "internal server error" });
 });
